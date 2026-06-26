@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useInView, useScroll, useSpring } from "framer-motion";
 import {
   Activity,
+  AlertCircle,
   ArrowRight,
   ArrowUp,
   BookOpen,
@@ -34,7 +35,8 @@ import heroImg from "@/assets/hero-medical.jpg";
 import t1 from "@/assets/testimonial-1.jpg";
 import t2 from "@/assets/testimonial-2.jpg";
 import t3 from "@/assets/testimonial-3.jpg";
-import { SUGGESTED_SYMPTOMS, predictDiseases, DISEASES, type Severity } from "@/data/diseases";
+import type { Disease, Prediction, Severity } from "../data/diseases"
+import { fetchDiseases, fetchSymptoms, predictDiseases } from "../services/predictations";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -55,8 +57,7 @@ export const Route = createFileRoute("/")({
   component: LandingPage,
 });
 
-/* ───────────────────────── Layout helpers ───────────────────────── */
-
+/* ── Constants ── */
 const NAV = [
   { id: "home", label: "Home" },
   { id: "predict", label: "Predict" },
@@ -72,16 +73,14 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const } },
 } as const;
 
+const sevTone: Record<Severity, { dot: string; bg: string; text: string; label: string }> = {
+  Low:      { dot: "bg-success",  bg: "bg-success/10",  text: "text-success",  label: "Low"      },
+  Moderate: { dot: "bg-warning",  bg: "bg-warning/10",  text: "text-warning",  label: "Moderate" },
+  High:     { dot: "bg-danger",   bg: "bg-danger/10",   text: "text-danger",   label: "High"     },
+};
 
-function Section({
-  id,
-  className = "",
-  children,
-}: {
-  id: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
+/* ── Layout helpers ── */
+function Section({ id, className = "", children }: { id: string; className?: string; children: React.ReactNode }) {
   return (
     <section id={id} className={`scroll-mt-24 py-20 md:py-28 ${className}`}>
       <div className="mx-auto max-w-7xl px-5 md:px-8">{children}</div>
@@ -107,8 +106,7 @@ function SectionHeading({ eyebrow, title, sub }: { eyebrow: string; title: strin
   );
 }
 
-/* ───────────────────────── Page ───────────────────────── */
-
+/* ── Page ── */
 function LandingPage() {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground">
@@ -132,8 +130,7 @@ function LandingPage() {
   );
 }
 
-/* ───────────────────────── Loading + scroll ───────────────────────── */
-
+/* ── Loading + scroll ── */
 function LoadingOverlay() {
   const [show, setShow] = useState(true);
   useEffect(() => {
@@ -198,8 +195,7 @@ function ScrollToTop() {
   );
 }
 
-/* ───────────────────────── Navbar ───────────────────────── */
-
+/* ── Navbar ── */
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -214,17 +210,10 @@ function Navbar() {
 
   useEffect(() => {
     const obs = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) setActive(e.target.id);
-        });
-      },
+      (entries) => entries.forEach((e) => { if (e.isIntersecting) setActive(e.target.id); }),
       { rootMargin: "-45% 0px -50% 0px" },
     );
-    NAV.forEach((n) => {
-      const el = document.getElementById(n.id);
-      if (el) obs.observe(el);
-    });
+    NAV.forEach((n) => { const el = document.getElementById(n.id); if (el) obs.observe(el); });
     return () => obs.disconnect();
   }, []);
 
@@ -234,17 +223,9 @@ function Navbar() {
   };
 
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all ${
-        scrolled ? "py-3" : "py-5"
-      }`}
-    >
+    <header className={`fixed top-0 left-0 right-0 z-50 transition-all ${scrolled ? "py-3" : "py-5"}`}>
       <div className="mx-auto max-w-7xl px-5 md:px-8">
-        <div
-          className={`flex items-center justify-between rounded-2xl px-4 md:px-6 py-3 transition-all ${
-            scrolled ? "glass-card shadow-soft" : "bg-transparent"
-          }`}
-        >
+        <div className={`flex items-center justify-between rounded-2xl px-4 md:px-6 py-3 transition-all ${scrolled ? "glass-card shadow-soft" : "bg-transparent"}`}>
           <button onClick={() => go("home")} className="flex items-center gap-2.5">
             <div className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft">
               <Stethoscope className="size-5" />
@@ -259,9 +240,7 @@ function Navbar() {
               <button
                 key={n.id}
                 onClick={() => go(n.id)}
-                className={`relative rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                  active === n.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-                }`}
+                className={`relative rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${active === n.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
               >
                 {active === n.id && (
                   <motion.span
@@ -305,9 +284,7 @@ function Navbar() {
                 <button
                   key={n.id}
                   onClick={() => go(n.id)}
-                  className={`block w-full rounded-xl px-4 py-2.5 text-left text-sm font-medium ${
-                    active === n.id ? "bg-secondary text-foreground" : "text-muted-foreground"
-                  }`}
+                  className={`block w-full rounded-xl px-4 py-2.5 text-left text-sm font-medium ${active === n.id ? "bg-secondary text-foreground" : "text-muted-foreground"}`}
                 >
                   {n.label}
                 </button>
@@ -320,20 +297,13 @@ function Navbar() {
   );
 }
 
-/* ───────────────────────── Hero ───────────────────────── */
-
+/* ── Hero ── */
 function Blobs() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
       <div className="absolute -top-32 -left-24 size-[28rem] rounded-full bg-accent/20 blur-3xl animate-blob" />
-      <div
-        className="absolute top-40 -right-24 size-[26rem] rounded-full bg-primary/15 blur-3xl animate-blob"
-        style={{ animationDelay: "3s" }}
-      />
-      <div
-        className="absolute bottom-0 left-1/3 size-[22rem] rounded-full bg-accent/15 blur-3xl animate-blob"
-        style={{ animationDelay: "6s" }}
-      />
+      <div className="absolute top-40 -right-24 size-[26rem] rounded-full bg-primary/15 blur-3xl animate-blob" style={{ animationDelay: "3s" }} />
+      <div className="absolute bottom-0 left-1/3 size-[22rem] rounded-full bg-accent/15 blur-3xl animate-blob" style={{ animationDelay: "6s" }} />
     </div>
   );
 }
@@ -344,11 +314,7 @@ function Hero() {
       <Blobs />
       <div className="mx-auto max-w-7xl px-5 md:px-8">
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-          <motion.div
-            initial="hidden"
-            animate="show"
-            variants={{ show: { transition: { staggerChildren: 0.08 } } }}
-          >
+          <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.08 } } }}>
             <motion.span
               variants={fadeUp}
               className="inline-flex items-center gap-2 rounded-full border border-border bg-card/70 backdrop-blur px-3 py-1.5 text-xs font-medium text-muted-foreground"
@@ -359,54 +325,40 @@ function Hero() {
               </span>
               AI Health Intelligence · v2.4
             </motion.span>
-            <motion.h1
-              variants={fadeUp}
-              className="mt-5 text-4xl md:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight"
-            >
+
+            <motion.h1 variants={fadeUp} className="mt-5 text-4xl md:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight">
               AI-Powered <br />
               <span className="gradient-text">Disease Prediction</span>
             </motion.h1>
-            <motion.p
-              variants={fadeUp}
-              className="mt-6 max-w-xl text-base md:text-lg text-muted-foreground leading-relaxed"
-            >
+
+            <motion.p variants={fadeUp} className="mt-6 max-w-xl text-base md:text-lg text-muted-foreground leading-relaxed">
               Enter your symptoms and receive possible health condition predictions within seconds —
               with confidence scores, severity and prevention guidance.
             </motion.p>
 
             <motion.div variants={fadeUp} className="mt-8 flex flex-wrap gap-3">
               <button
-                onClick={() =>
-                  document.getElementById("predict")?.scrollIntoView({ behavior: "smooth" })
-                }
+                onClick={() => document.getElementById("predict")?.scrollIntoView({ behavior: "smooth" })}
                 className="group inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground shadow-elevated transition-transform hover:scale-[1.03]"
               >
                 Start Prediction
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
               </button>
               <button
-                onClick={() =>
-                  document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })
-                }
+                onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })}
                 className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-6 py-3.5 text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
               >
                 Learn More
               </button>
             </motion.div>
 
-            <motion.div
-              variants={fadeUp}
-              className="mt-10 grid grid-cols-3 gap-4 max-w-md"
-            >
+            <motion.div variants={fadeUp} className="mt-10 grid grid-cols-3 gap-4 max-w-md">
               {[
                 { icon: Brain, label: "Neural Engine" },
                 { icon: HeartPulse, label: "Real-time" },
                 { icon: ShieldCheck, label: "Private" },
               ].map((f) => (
-                <div
-                  key={f.label}
-                  className="flex flex-col items-start gap-2 rounded-2xl bg-card/60 backdrop-blur border border-border p-3"
-                >
+                <div key={f.label} className="flex flex-col items-start gap-2 rounded-2xl bg-card/60 backdrop-blur border border-border p-3">
                   <div className="grid size-9 place-items-center rounded-lg bg-primary/5 text-primary">
                     <f.icon className="size-4.5" />
                   </div>
@@ -425,15 +377,8 @@ function Hero() {
             <div className="relative aspect-square w-full max-w-lg mx-auto">
               <div className="absolute inset-0 rounded-[2.5rem] bg-gradient-to-br from-accent/30 via-primary/20 to-transparent blur-2xl" />
               <div className="relative overflow-hidden rounded-[2.5rem] border border-border bg-card shadow-elevated">
-                <img
-                  src={heroImg}
-                  alt="AI medical illustration with neural network overlay"
-                  width={1024}
-                  height={1024}
-                  className="size-full object-cover"
-                />
+                <img src={heroImg} alt="AI medical illustration" width={1024} height={1024} className="size-full object-cover" />
               </div>
-
               <motion.div
                 animate={{ y: [0, -10, 0] }}
                 transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
@@ -447,7 +392,6 @@ function Hero() {
                   <div className="text-sm font-bold">72 bpm</div>
                 </div>
               </motion.div>
-
               <motion.div
                 animate={{ y: [0, 12, 0] }}
                 transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 0.6 }}
@@ -461,7 +405,6 @@ function Hero() {
                   <div className="text-sm font-bold">93% Match</div>
                 </div>
               </motion.div>
-
               <motion.div
                 animate={{ y: [0, -8, 0] }}
                 transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut", delay: 1.2 }}
@@ -477,47 +420,64 @@ function Hero() {
   );
 }
 
-/* ───────────────────────── Prediction Tool ───────────────────────── */
-
-const sevTone: Record<Severity, { dot: string; bg: string; text: string; label: string }> = {
-  Low: { dot: "bg-success", bg: "bg-success/10", text: "text-success", label: "Low" },
-  Moderate: { dot: "bg-warning", bg: "bg-warning/10", text: "text-warning", label: "Moderate" },
-  High: { dot: "bg-danger", bg: "bg-danger/10", text: "text-danger", label: "High" },
-};
-
+/* ── Prediction Tool ── */
 function PredictionTool() {
-  const [selected, setSelected] = useState<string[]>(["Fever", "Headache"]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  const [results, setResults] = useState<ReturnType<typeof predictDiseases>>([]);
+  const [results, setResults] = useState<Prediction[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [suggestedSymptoms, setSuggestedSymptoms] = useState<string[]>([]);
+  const [loadingSymptoms, setLoadingSymptoms] = useState(true);
+
+  useEffect(() => {
+    fetchSymptoms()
+      .then(setSuggestedSymptoms)
+      .catch(() => setError("Could not load symptoms from server. Is the backend running?"))
+      .finally(() => setLoadingSymptoms(false));
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
     if (!q) return [];
-    return SUGGESTED_SYMPTOMS.filter(
-      (s) => s.toLowerCase().includes(q) && !selected.includes(s),
-    ).slice(0, 6);
-  }, [query, selected]);
+    return suggestedSymptoms
+      .filter((s) => s.toLowerCase().includes(q) && !selected.includes(s))
+      .slice(0, 6);
+  }, [query, selected, suggestedSymptoms]);
 
   const add = (s: string) => {
-    const v = s.trim();
+    const v = s.trim().toLowerCase();
     if (!v) return;
-    if (!selected.find((x) => x.toLowerCase() === v.toLowerCase())) {
-      setSelected([...selected, v]);
-    }
+    if (!selected.includes(v)) setSelected((prev) => [...prev, v]);
     setQuery("");
   };
 
-  const remove = (s: string) => setSelected(selected.filter((x) => x !== s));
+  const remove = (s: string) => setSelected((prev) => prev.filter((x) => x !== s));
 
-  const analyze = () => {
+  const analyze = async () => {
     if (selected.length === 0) return;
+    setError(null);
     setAnalyzing(true);
     setResults([]);
-    setTimeout(() => {
-      setResults(predictDiseases(selected));
+    try {
+      const predictions = await predictDiseases(selected);
+      if (predictions.length === 0) {
+        setError("No matching conditions found. Try adding more specific symptoms.");
+      } else {
+        setResults(predictions);
+      }
+    } catch {
+      setError("Could not reach the prediction server. Make sure the backend is running on port 8000.");
+    } finally {
       setAnalyzing(false);
-    }, 900);
+    }
+  };
+
+  const reset = () => {
+    setSelected([]);
+    setResults([]);
+    setError(null);
+    setQuery("");
   };
 
   return (
@@ -525,7 +485,7 @@ function PredictionTool() {
       <SectionHeading
         eyebrow="Symptom Analyzer"
         title="Disease Prediction Tool"
-        sub="Add the symptoms you're experiencing — our model will suggest the most probable conditions."
+        sub="Select the symptoms you're experiencing — our engine will suggest the most probable conditions."
       />
 
       <motion.div
@@ -535,6 +495,7 @@ function PredictionTool() {
         viewport={{ once: true, margin: "-80px" }}
         className="mx-auto max-w-4xl rounded-3xl glass-card p-6 md:p-10 shadow-elevated"
       >
+        {/* Search */}
         <label className="block text-sm font-semibold text-foreground">Search symptoms</label>
         <div className="relative mt-3">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-muted-foreground" />
@@ -544,21 +505,24 @@ function PredictionTool() {
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                add(query);
+                if (filtered.length > 0) add(filtered[0]);
+                else if (query.trim()) add(query);
               }
             }}
-            placeholder="e.g. Fever, Cough, Headache…"
-            className="w-full rounded-2xl border border-border bg-background/70 pl-12 pr-28 py-3.5 text-sm font-medium outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            placeholder={loadingSymptoms ? "Loading symptoms…" : "e.g. fever, cough, headache…"}
+            disabled={loadingSymptoms}
+            className="w-full rounded-2xl border border-border bg-background/70 pl-12 pr-28 py-3.5 text-sm font-medium outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15 disabled:opacity-50"
           />
           <button
-            onClick={() => add(query)}
-            disabled={!query.trim()}
+            onClick={() => { if (filtered.length > 0) add(filtered[0]); else if (query.trim()) add(query); }}
+            disabled={!query.trim() || loadingSymptoms}
             className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40"
           >
             <Plus className="size-3.5" /> Add
           </button>
         </div>
 
+        {/* Dropdown */}
         <AnimatePresence>
           {filtered.length > 0 && (
             <motion.div
@@ -571,7 +535,7 @@ function PredictionTool() {
                 <button
                   key={s}
                   onClick={() => add(s)}
-                  className="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-secondary"
+                  className="block w-full rounded-xl px-3 py-2 text-left text-sm capitalize hover:bg-secondary"
                 >
                   {s}
                 </button>
@@ -580,34 +544,49 @@ function PredictionTool() {
           )}
         </AnimatePresence>
 
+        {/* Quick-add chips — loaded from backend */}
         <div className="mt-6">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Quick add
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {SUGGESTED_SYMPTOMS.slice(0, 9).map((s) => {
-              const isSel = selected.includes(s);
-              return (
-                <button
-                  key={s}
-                  onClick={() => (isSel ? remove(s) : add(s))}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                    isSel
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card hover:bg-secondary"
-                  }`}
-                >
-                  {isSel ? <X className="size-3" /> : <Plus className="size-3" />} {s}
-                </button>
-              );
-            })}
-          </div>
+          {loadingSymptoms ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-8 w-20 animate-pulse rounded-full bg-secondary" />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {suggestedSymptoms.slice(0, 12).map((s) => {
+                const isSel = selected.includes(s);
+                return (
+                  <button
+                    key={s}
+                    onClick={() => (isSel ? remove(s) : add(s))}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition ${
+                      isSel
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-card hover:bg-secondary"
+                    }`}
+                  >
+                    {isSel ? <X className="size-3" /> : <Plus className="size-3" />} {s}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
+        {/* Selected */}
         {selected.length > 0 && (
           <div className="mt-6">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Selected ({selected.length})
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Selected ({selected.length})
+              </div>
+              <button onClick={reset} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                Clear all
+              </button>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               <AnimatePresence>
@@ -618,7 +597,7 @@ function PredictionTool() {
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
-                    className="inline-flex items-center gap-2 rounded-full bg-accent/10 text-accent border border-accent/20 px-3 py-1.5 text-xs font-semibold"
+                    className="inline-flex items-center gap-2 rounded-full bg-accent/10 text-accent border border-accent/20 px-3 py-1.5 text-xs font-semibold capitalize"
                   >
                     {s}
                     <button onClick={() => remove(s)} aria-label={`Remove ${s}`}>
@@ -631,34 +610,55 @@ function PredictionTool() {
           </div>
         )}
 
-        <button
-          onClick={analyze}
-          disabled={selected.length === 0 || analyzing}
-          className="mt-8 inline-flex w-full md:w-auto items-center justify-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-semibold text-primary-foreground shadow-elevated transition-transform hover:scale-[1.02] disabled:opacity-40 disabled:hover:scale-100"
-        >
-          {analyzing ? (
-            <>
-              <motion.span
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                className="inline-block size-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground"
-              />
-              Analyzing…
-            </>
-          ) : (
-            <>
-              <Brain className="size-4" /> Analyze Symptoms
-            </>
+        {/* Analyze button */}
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          <button
+            onClick={analyze}
+            disabled={selected.length === 0 || analyzing}
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-semibold text-primary-foreground shadow-elevated transition-transform hover:scale-[1.02] disabled:opacity-40 disabled:hover:scale-100"
+          >
+            {analyzing ? (
+              <>
+                <motion.span
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                  className="inline-block size-4 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground"
+                />
+                Analyzing…
+              </>
+            ) : (
+              <><Brain className="size-4" /> Analyze Symptoms</>
+            )}
+          </button>
+          {selected.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {selected.length} symptom{selected.length > 1 ? "s" : ""} selected
+            </span>
           )}
-        </button>
+        </div>
+
+        {/* Error */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-5 flex items-start gap-3 rounded-2xl border border-danger/20 bg-danger/5 px-4 py-3"
+            >
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
+              <p className="text-sm text-danger">{error}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <p className="mt-5 text-xs text-muted-foreground">
           <ShieldCheck className="inline size-3.5 -mt-0.5 mr-1 text-accent" />
-          This AI tool is for educational purposes only and does not replace professional medical
-          advice.
+          For educational purposes only — not a substitute for professional medical advice.
         </p>
       </motion.div>
 
+      {/* Results */}
       <AnimatePresence>
         {results.length > 0 && (
           <motion.div
@@ -667,7 +667,12 @@ function PredictionTool() {
             exit={{ opacity: 0, y: 20 }}
             className="mx-auto mt-10 max-w-4xl"
           >
-            <h3 className="text-lg font-semibold mb-4">Top possible conditions</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Top possible conditions</h3>
+              <span className="text-xs text-muted-foreground">
+                Based on {selected.length} symptom{selected.length > 1 ? "s" : ""}
+              </span>
+            </div>
             <div className="grid gap-4">
               {results.map((r, i) => {
                 const tone = sevTone[r.disease.severity];
@@ -689,11 +694,9 @@ function PredictionTool() {
                           </span>
                         </div>
                         <h4 className="mt-1 text-xl font-bold">{r.disease.name}</h4>
-                        <p className="mt-2 text-sm text-muted-foreground max-w-xl">
-                          {r.disease.description}
-                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground max-w-xl">{r.disease.description}</p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <div className="text-3xl font-bold gradient-text">{r.confidence}%</div>
                         <div className="text-xs text-muted-foreground">confidence</div>
                       </div>
@@ -710,25 +713,32 @@ function PredictionTool() {
 
                     <div className="mt-5 grid md:grid-cols-2 gap-4">
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Common symptoms
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                          Known symptoms
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {r.disease.symptoms.map((s) => (
-                            <span
-                              key={s}
-                              className="rounded-full bg-secondary px-2.5 py-1 text-xs capitalize"
-                            >
-                              {s}
-                            </span>
-                          ))}
+                        <div className="flex flex-wrap gap-1.5">
+                          {r.disease.symptoms.map((s) => {
+                            const matched = selected.includes(s);
+                            return (
+                              <span
+                                key={s}
+                                className={`rounded-full px-2.5 py-1 text-xs capitalize transition ${
+                                  matched
+                                    ? "bg-accent/15 text-accent border border-accent/30 font-semibold"
+                                    : "bg-secondary text-muted-foreground"
+                                }`}
+                              >
+                                {matched && "✓ "}{s}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                           Prevention tips
                         </div>
-                        <ul className="mt-2 space-y-1.5">
+                        <ul className="space-y-1.5">
                           {r.disease.prevention.map((p) => (
                             <li key={p} className="flex items-start gap-2 text-sm">
                               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" /> {p}
@@ -748,39 +758,18 @@ function PredictionTool() {
   );
 }
 
-/* ───────────────────────── Services ───────────────────────── */
-
+/* ── Services ── */
 const SERVICES = [
-  {
-    icon: Activity,
-    title: "AI Symptom Analysis",
-    desc: "Multi-symptom pattern recognition powered by curated medical datasets.",
-  },
-  {
-    icon: Shield,
-    title: "Health Risk Assessment",
-    desc: "Severity scoring with low / moderate / high categorization for each match.",
-  },
-  {
-    icon: Zap,
-    title: "Instant Predictions",
-    desc: "Top 3 probable conditions returned in under a second with confidence scores.",
-  },
-  {
-    icon: BookOpen,
-    title: "Medical Information",
-    desc: "Plain-language descriptions, common symptoms and prevention guidance.",
-  },
+  { icon: Activity, title: "AI Symptom Analysis",   desc: "TF-IDF weighted pattern recognition across curated disease profiles." },
+  { icon: Shield,   title: "Health Risk Assessment", desc: "Severity scoring with Low / Moderate / High categorization for each match." },
+  { icon: Zap,      title: "Instant Predictions",    desc: "Top 3 probable conditions ranked by confidence score in milliseconds." },
+  { icon: BookOpen, title: "Medical Information",    desc: "Plain-language descriptions, known symptoms and prevention guidance." },
 ];
 
 function Services() {
   return (
     <Section id="services" className="bg-[color:var(--whitesmoke)]">
-      <SectionHeading
-        eyebrow="What we offer"
-        title="Services built for clarity"
-        sub="A focused toolkit for understanding what your symptoms might mean."
-      />
+      <SectionHeading eyebrow="What we offer" title="Services built for clarity" sub="A focused toolkit for understanding what your symptoms might mean." />
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
         {SERVICES.map((s, i) => (
           <motion.div
@@ -804,34 +793,17 @@ function Services() {
   );
 }
 
-/* ───────────────────────── How it works ───────────────────────── */
-
+/* ── How it works ── */
 const STEPS = [
-  {
-    icon: ClipboardList,
-    title: "Enter Symptoms",
-    desc: "Pick from our library or type your own — add as many as you like.",
-  },
-  {
-    icon: Brain,
-    title: "AI Analysis",
-    desc: "Our model scores each symptom pattern against known disease profiles.",
-  },
-  {
-    icon: FileHeart,
-    title: "Receive Predictions",
-    desc: "Get the top 3 possible conditions with confidence and prevention tips.",
-  },
+  { icon: ClipboardList, title: "Select Symptoms",    desc: "Pick from the backend-powered library or type your own symptom." },
+  { icon: Brain,         title: "AI Scoring",         desc: "TF-IDF engine weights each symptom by specificity against all disease profiles." },
+  { icon: FileHeart,     title: "Receive Predictions", desc: "Get the top 3 conditions with confidence scores and prevention tips." },
 ];
 
 function HowItWorks() {
   return (
     <Section id="how">
-      <SectionHeading
-        eyebrow="Process"
-        title="How it works"
-        sub="Three simple steps from symptoms to insights."
-      />
+      <SectionHeading eyebrow="Process" title="How it works" sub="Three steps from symptoms to insights." />
       <div className="relative grid md:grid-cols-3 gap-6">
         <div className="hidden md:block absolute top-12 left-[16%] right-[16%] h-px bg-gradient-to-r from-transparent via-border to-transparent" />
         {STEPS.map((s, i) => (
@@ -858,85 +830,95 @@ function HowItWorks() {
   );
 }
 
-/* ───────────────────────── Disease Info ───────────────────────── */
-
-const FEATURED = ["Diabetes", "Dengue", "Malaria", "Typhoid", "Tuberculosis", "Asthma"];
-
+/* ── Disease Info — fetched from backend ── */
 function DiseaseInfo() {
+  const [diseases, setDiseases] = useState<Disease[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchDiseases()
+      .then(setDiseases)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <Section id="diseases" className="bg-[color:var(--whitesmoke)]">
       <SectionHeading
         eyebrow="Knowledge base"
         title="Common diseases at a glance"
-        sub="Quick reference cards with key symptoms and prevention."
+        sub="Quick reference cards with key symptoms and prevention — loaded live from the backend."
       />
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {FEATURED.map((name, i) => {
-          const d = DISEASES.find((x) => x.name === name)!;
-          const tone = sevTone[d.severity];
-          return (
-            <motion.article
-              key={name}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.5, delay: i * 0.06 }}
-              whileHover={{ y: -4 }}
-              className="rounded-3xl bg-card border border-border p-6 shadow-soft transition-shadow hover:shadow-elevated"
-            >
-              <div className="flex items-start justify-between">
-                <h3 className="text-xl font-bold">{d.name}</h3>
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full ${tone.bg} ${tone.text} px-2.5 py-1 text-xs font-semibold`}
-                >
-                  <span className={`size-1.5 rounded-full ${tone.dot}`} /> {tone.label}
-                </span>
+      {loading ? (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-3xl bg-card border border-border p-6 shadow-soft space-y-3">
+              <div className="flex justify-between">
+                <div className="h-6 w-32 animate-pulse rounded-full bg-secondary" />
+                <div className="h-6 w-16 animate-pulse rounded-full bg-secondary" />
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">{d.description}</p>
-
-              <div className="mt-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Symptoms
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {d.symptoms.slice(0, 4).map((s) => (
-                    <span
-                      key={s}
-                      className="rounded-full bg-secondary px-2.5 py-0.5 text-xs capitalize"
-                    >
-                      {s}
-                    </span>
-                  ))}
-                </div>
+              <div className="h-4 w-full animate-pulse rounded-full bg-secondary" />
+              <div className="h-4 w-3/4 animate-pulse rounded-full bg-secondary" />
+              <div className="flex gap-2 mt-2">
+                {Array.from({ length: 3 }).map((_, j) => (
+                  <div key={j} className="h-6 w-16 animate-pulse rounded-full bg-secondary" />
+                ))}
               </div>
-
-              <div className="mt-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Prevention
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {diseases.slice(0, 6).map((d, i) => {
+            const tone = sevTone[d.severity];
+            return (
+              <motion.article
+                key={d.name}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.5, delay: i * 0.06 }}
+                whileHover={{ y: -4 }}
+                className="rounded-3xl bg-card border border-border p-6 shadow-soft transition-shadow hover:shadow-elevated"
+              >
+                <div className="flex items-start justify-between">
+                  <h3 className="text-xl font-bold">{d.name}</h3>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full ${tone.bg} ${tone.text} px-2.5 py-1 text-xs font-semibold`}>
+                    <span className={`size-1.5 rounded-full ${tone.dot}`} /> {tone.label}
+                  </span>
                 </div>
-                <ul className="mt-1.5 space-y-1">
-                  {d.prevention.slice(0, 2).map((p) => (
-                    <li key={p} className="flex items-start gap-2 text-sm">
-                      <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" /> {p}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <button className="group mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent">
-                Learn more
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
-              </button>
-            </motion.article>
-          );
-        })}
-      </div>
+                <p className="mt-2 text-sm text-muted-foreground">{d.description}</p>
+                <div className="mt-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Symptoms</div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {d.symptoms.slice(0, 4).map((s) => (
+                      <span key={s} className="rounded-full bg-secondary px-2.5 py-0.5 text-xs capitalize">{s}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prevention</div>
+                  <ul className="mt-1.5 space-y-1">
+                    {d.prevention.slice(0, 2).map((p) => (
+                      <li key={p} className="flex items-start gap-2 text-sm">
+                        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" /> {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <button className="group mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent">
+                  Learn more <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+                </button>
+              </motion.article>
+            );
+          })}
+        </div>
+      )}
     </Section>
   );
 }
 
-/* ───────────────────────── Stats ───────────────────────── */
-
+/* ── Stats ── */
 function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
@@ -955,19 +937,14 @@ function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [inView, to]);
-  return (
-    <span ref={ref}>
-      {val.toLocaleString()}
-      {suffix}
-    </span>
-  );
+  return <span ref={ref}>{val.toLocaleString()}{suffix}</span>;
 }
 
 const STATS = [
-  { value: 1000, suffix: "+", label: "Symptom Patterns" },
-  { value: 50, suffix: "+", label: "Disease Categories" },
-  { value: 99, suffix: "%", label: "Uptime, Real-Time" },
-  { value: 800, suffix: "ms", label: "Avg Prediction Time" },
+  { value: 12,  suffix: "",   label: "Disease Profiles" },
+  { value: 35,  suffix: "+",  label: "Tracked Symptoms" },
+  { value: 99,  suffix: "%",  label: "Uptime" },
+  { value: 50,  suffix: "ms", label: "Avg Response Time" },
 ];
 
 function Stats() {
@@ -991,30 +968,11 @@ function Stats() {
   );
 }
 
-/* ───────────────────────── Testimonials ───────────────────────── */
-
+/* ── Testimonials ── */
 const TESTIMONIALS = [
-  {
-    img: t1,
-    name: "Dr. Amara Khan",
-    role: "Family Physician",
-    rating: 5,
-    text: "A genuinely useful triage companion. The confidence scoring helps patients ask better questions before visiting the clinic.",
-  },
-  {
-    img: t2,
-    name: "Marcus Reilly",
-    role: "Health Educator",
-    rating: 5,
-    text: "Clean, calm interface — exactly what people need when they're feeling unwell. The prevention tips are a thoughtful touch.",
-  },
-  {
-    img: t3,
-    name: "Sofia Tanaka",
-    role: "Wellness Coach",
-    rating: 5,
-    text: "I recommend MediPredict to clients as a starting point. Fast, clear, and respectful of medical complexity.",
-  },
+  { img: t1, name: "Dr. Amara Khan",  role: "Family Physician", rating: 5, text: "A genuinely useful triage companion. The confidence scoring helps patients ask better questions before visiting the clinic." },
+  { img: t2, name: "Marcus Reilly",   role: "Health Educator",  rating: 5, text: "Clean, calm interface — exactly what people need when they're feeling unwell. The prevention tips are a thoughtful touch." },
+  { img: t3, name: "Sofia Tanaka",    role: "Wellness Coach",   rating: 5, text: "I recommend MediPredict to clients as a starting point. Fast, clear, and respectful of medical complexity." },
 ];
 
 function Testimonials() {
@@ -1024,42 +982,20 @@ function Testimonials() {
     const t = setInterval(() => setI((v) => (v + 1) % len), 5500);
     return () => clearInterval(t);
   }, [len]);
-
   const t = TESTIMONIALS[i];
   return (
     <Section id="testimonials">
-      <SectionHeading
-        eyebrow="Testimonials"
-        title="Trusted by health-minded people"
-        sub="What clinicians, educators and users say about MediPredict."
-      />
+      <SectionHeading eyebrow="Testimonials" title="Trusted by health-minded people" sub="What clinicians, educators and users say about MediPredict." />
       <div className="mx-auto max-w-3xl">
         <div className="relative rounded-3xl glass-card p-8 md:p-12 shadow-elevated">
           <AnimatePresence mode="wait">
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              transition={{ duration: 0.4 }}
-            >
+            <motion.div key={i} initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.4 }}>
               <div className="flex gap-0.5 text-warning">
-                {Array.from({ length: t.rating }).map((_, k) => (
-                  <Star key={k} className="size-4 fill-current" />
-                ))}
+                {Array.from({ length: t.rating }).map((_, k) => <Star key={k} className="size-4 fill-current" />)}
               </div>
-              <p className="mt-5 text-lg md:text-2xl font-medium leading-relaxed text-foreground">
-                "{t.text}"
-              </p>
+              <p className="mt-5 text-lg md:text-2xl font-medium leading-relaxed text-foreground">"{t.text}"</p>
               <div className="mt-7 flex items-center gap-4">
-                <img
-                  src={t.img}
-                  alt={t.name}
-                  width={56}
-                  height={56}
-                  loading="lazy"
-                  className="size-14 rounded-full object-cover border border-border"
-                />
+                <img src={t.img} alt={t.name} width={56} height={56} loading="lazy" className="size-14 rounded-full object-cover border border-border" />
                 <div>
                   <div className="font-semibold">{t.name}</div>
                   <div className="text-sm text-muted-foreground">{t.role}</div>
@@ -1067,17 +1003,10 @@ function Testimonials() {
               </div>
             </motion.div>
           </AnimatePresence>
-
           <div className="mt-8 flex items-center justify-center gap-2">
             {TESTIMONIALS.map((_, k) => (
-              <button
-                key={k}
-                onClick={() => setI(k)}
-                aria-label={`Show testimonial ${k + 1}`}
-                className={`h-1.5 rounded-full transition-all ${
-                  k === i ? "w-8 bg-primary" : "w-1.5 bg-border"
-                }`}
-              />
+              <button key={k} onClick={() => setI(k)} aria-label={`Show testimonial ${k + 1}`}
+                className={`h-1.5 rounded-full transition-all ${k === i ? "w-8 bg-primary" : "w-1.5 bg-border"}`} />
             ))}
           </div>
         </div>
@@ -1086,48 +1015,26 @@ function Testimonials() {
   );
 }
 
-/* ───────────────────────── FAQ ───────────────────────── */
-
+/* ── FAQ ── */
 const FAQS = [
-  {
-    q: "Is this medically accurate?",
-    a: "MediPredict provides educational suggestions based on symptom patterns. It is not a diagnostic tool and should not replace consultation with a qualified medical professional.",
-  },
-  {
-    q: "Can AI replace doctors?",
-    a: "No. AI can help organize information and surface possibilities, but diagnosis and treatment require clinical judgement, examination and testing by a licensed clinician.",
-  },
-  {
-    q: "How many symptoms can I enter?",
-    a: "There is no hard limit — add as many relevant symptoms as you want. More precise input typically yields more focused predictions.",
-  },
-  {
-    q: "Is my data stored?",
-    a: "Symptom input runs locally in your browser for the demo. We do not persist personal health information without explicit consent.",
-  },
+  { q: "Is this medically accurate?",      a: "MediPredict provides educational suggestions based on symptom patterns. It is not a diagnostic tool and should not replace consultation with a qualified medical professional." },
+  { q: "How does the scoring work?",       a: "The engine uses TF-IDF weighting — symptoms that are rare across diseases (like 'rash' or 'night sweats') score higher than common ones like 'fatigue', giving more specific predictions." },
+  { q: "How many symptoms can I enter?",   a: "There is no hard limit — add as many relevant symptoms as you want. More specific input typically yields more focused predictions." },
+  { q: "Is my data stored?",               a: "Symptoms are sent only to your local backend running on port 8000. Nothing is persisted or sent to any third-party service." },
+  { q: "Where does disease data come from?", a: "All disease profiles, symptoms, and prevention tips are fetched live from the FastAPI backend — no data is hardcoded in the frontend." },
 ];
 
 function FAQ() {
   const [open, setOpen] = useState<number | null>(0);
   return (
     <Section id="faq" className="bg-[color:var(--whitesmoke)]">
-      <SectionHeading
-        eyebrow="FAQ"
-        title="Questions, answered"
-        sub="The most common things people ask before trying MediPredict."
-      />
+      <SectionHeading eyebrow="FAQ" title="Questions, answered" sub="The most common things people ask before trying MediPredict." />
       <div className="mx-auto max-w-3xl space-y-3">
         {FAQS.map((f, i) => {
           const isOpen = open === i;
           return (
-            <div
-              key={f.q}
-              className="rounded-2xl border border-border bg-card overflow-hidden shadow-soft"
-            >
-              <button
-                onClick={() => setOpen(isOpen ? null : i)}
-                className="flex w-full items-center justify-between gap-4 px-5 md:px-6 py-4 text-left"
-              >
+            <div key={f.q} className="rounded-2xl border border-border bg-card overflow-hidden shadow-soft">
+              <button onClick={() => setOpen(isOpen ? null : i)} className="flex w-full items-center justify-between gap-4 px-5 md:px-6 py-4 text-left">
                 <span className="font-semibold">{f.q}</span>
                 <motion.span animate={{ rotate: isOpen ? 180 : 0 }} className="text-muted-foreground">
                   <ChevronDown className="size-5" />
@@ -1135,15 +1042,8 @@ function FAQ() {
               </button>
               <AnimatePresence initial={false}>
                 {isOpen && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.25 }}
-                  >
-                    <div className="px-5 md:px-6 pb-5 text-sm text-muted-foreground leading-relaxed">
-                      {f.a}
-                    </div>
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}>
+                    <div className="px-5 md:px-6 pb-5 text-sm text-muted-foreground leading-relaxed">{f.a}</div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1155,41 +1055,30 @@ function FAQ() {
   );
 }
 
-/* ───────────────────────── Contact ───────────────────────── */
-
+/* ── Contact ── */
 function Contact() {
   const [sent, setSent] = useState(false);
   return (
     <Section id="contact">
-      <SectionHeading
-        eyebrow="Contact"
-        title="Get in touch"
-        sub="Have a question or want to partner? We'd love to hear from you."
-      />
+      <SectionHeading eyebrow="Contact" title="Get in touch" sub="Have a question or want to partner? We'd love to hear from you." />
       <div className="grid lg:grid-cols-5 gap-8">
         <div className="lg:col-span-2 space-y-4">
           {[
-            { icon: Phone, label: "Phone", value: "+1 (415) 555-0188" },
-            { icon: Mail, label: "Email", value: "hello@medipredict.ai" },
-            { icon: MapPin, label: "Location", value: "San Francisco, CA" },
+            { icon: Phone,  label: "Phone",    value: "+1 (415) 555-0188"   },
+            { icon: Mail,   label: "Email",    value: "hello@medipredict.ai" },
+            { icon: MapPin, label: "Location", value: "San Francisco, CA"   },
           ].map((c) => (
-            <div
-              key={c.label}
-              className="flex items-start gap-4 rounded-2xl bg-card border border-border p-5 shadow-soft"
-            >
+            <div key={c.label} className="flex items-start gap-4 rounded-2xl bg-card border border-border p-5 shadow-soft">
               <div className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground">
                 <c.icon className="size-5" />
               </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {c.label}
-                </div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">{c.label}</div>
                 <div className="mt-0.5 font-semibold">{c.value}</div>
               </div>
             </div>
           ))}
         </div>
-
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1201,35 +1090,17 @@ function Contact() {
         >
           <div className="grid md:grid-cols-2 gap-4">
             <Field label="Name">
-              <input
-                required
-                maxLength={100}
-                className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15"
-              />
+              <input required maxLength={100} className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15" />
             </Field>
             <Field label="Email">
-              <input
-                type="email"
-                required
-                maxLength={255}
-                className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15"
-              />
+              <input type="email" required maxLength={255} className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15" />
             </Field>
           </div>
           <Field label="Message">
-            <textarea
-              required
-              maxLength={1000}
-              rows={5}
-              className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15 resize-none"
-            />
+            <textarea required maxLength={1000} rows={5} className="w-full rounded-xl border border-border bg-background/70 px-4 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/15 resize-none" />
           </Field>
-          <button
-            type="submit"
-            className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-soft transition-transform hover:scale-[1.03]"
-          >
-            <Send className="size-4" />
-            {sent ? "Message sent ✓" : "Send message"}
+          <button type="submit" className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-soft transition-transform hover:scale-[1.03]">
+            <Send className="size-4" /> {sent ? "Message sent ✓" : "Send message"}
           </button>
         </form>
       </div>
@@ -1240,16 +1111,13 @@ function Contact() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-        {label}
-      </span>
+      <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{label}</span>
       {children}
     </label>
   );
 }
 
-/* ───────────────────────── Footer ───────────────────────── */
-
+/* ── Footer ── */
 function Footer() {
   return (
     <footer className="bg-primary text-primary-foreground mt-10">
@@ -1260,22 +1128,14 @@ function Footer() {
               <div className="grid size-9 place-items-center rounded-xl bg-white/10">
                 <Stethoscope className="size-5" />
               </div>
-              <span className="font-display text-lg font-bold">
-                MediPredict<span className="text-accent">.AI</span>
-              </span>
+              <span className="font-display text-lg font-bold">MediPredict<span className="text-accent">.AI</span></span>
             </div>
             <p className="mt-4 max-w-md text-sm text-primary-foreground/70 leading-relaxed">
-              AI-powered disease prediction for everyday health curiosity. Educational only — always
-              consult a clinician for diagnosis.
+              AI-powered disease prediction for everyday health curiosity. Educational only — always consult a clinician for diagnosis.
             </p>
             <div className="mt-5 flex gap-2">
               {[Twitter, Linkedin, Facebook, Github].map((Ic, i) => (
-                <a
-                  key={i}
-                  href="#"
-                  aria-label="Social link"
-                  className="grid size-10 place-items-center rounded-xl bg-white/10 transition-colors hover:bg-white/20"
-                >
+                <a key={i} href="#" aria-label="Social link" className="grid size-10 place-items-center rounded-xl bg-white/10 transition-colors hover:bg-white/20">
                   <Ic className="size-4" />
                 </a>
               ))}
@@ -1286,9 +1146,7 @@ function Footer() {
             <ul className="space-y-2 text-sm text-primary-foreground/70">
               {NAV.map((n) => (
                 <li key={n.id}>
-                  <a href={`#${n.id}`} className="hover:text-primary-foreground transition-colors">
-                    {n.label}
-                  </a>
+                  <a href={`#${n.id}`} className="hover:text-primary-foreground transition-colors">{n.label}</a>
                 </li>
               ))}
             </ul>
