@@ -1,7 +1,7 @@
 import type { Disease, Prediction } from "../data/diseases";
 
 const API_URL = import.meta.env.VITE_API_URL;
-
+console.log("API_URL:", API_URL);
 export async function predictDiseases(symptoms: string[]): Promise<Prediction[]> {
   const response = await fetch(`${API_URL}/predict`, {
     method: "POST",
